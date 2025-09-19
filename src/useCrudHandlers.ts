@@ -26,6 +26,7 @@ export const useCrudHandlers = () => {
         }
 
         const data = await response.json();
+        
         setTodos(data);
         setIsLoading(false);
       } catch (err) {
