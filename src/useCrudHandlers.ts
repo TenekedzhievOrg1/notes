@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Todo } from "./types";
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = "https://mcf3xoazbe.execute-api.us-east-1.amazonaws.com/prod";
 
 export const useCrudHandlers = () => {
   const [todos, setTodos] = useState<Todo[]>([]);
