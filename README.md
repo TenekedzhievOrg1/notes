@@ -9,6 +9,8 @@ CI/CD workflows (GitHub Actions), Infrastructure-as-Code (IaC) template, and sys
 The application is available at:
 https://d2gg6njvfiqvon.cloudfront.net
 
+![App Preview](./docs/app-preview.png)
+
 ---
 
 ## Architecture Overview
@@ -38,7 +40,7 @@ https://d2gg6njvfiqvon.cloudfront.net
 
 ## Infrastructure
 
-- **![CloudFormation template](./templates/infrastructure-template.yml)** defines:
+- **![CloudFormation template](./docs/infrastructure-template.yml)** defines:
   - S3 + CloudFront
   - DynamoDB
   - Lambda functions
