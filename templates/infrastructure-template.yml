@@ -1,0 +1,429 @@
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: prod
+    Description: Environment name (dev, test, prod)
+  BucketName:
+    Type: String
+    Description: S3 bucket name
+  BucketIndexDocument:
+    Type: String
+    Default: index.html
+  BucketErrorDocument:
+    Type: String
+    Default: index.html
+  ApiName:
+    Type: String
+    Default: TodosAPI
+    Description: Api Gateway Rest API name
+  DDBTableName:
+    Type: String
+    Default: Todos
+    Description: DynamoDB table name
+
+Resources:
+  S3Bucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: !Sub ${BucketIndexDocument}
+        ErrorDocument: !Sub ${BucketErrorDocument}
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+      BucketName: !Sub ${BucketName}
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: "BucketOwnerEnforced"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - BucketKeyEnabled: true
+          ServerSideEncryptionByDefault:
+            SSEAlgorithm: "AES256"
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn:
+      - S3Bucket
+      - CloudFrontDistribution
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "cloudfront.amazonaws.com"
+            Action: "s3:GetObject"
+            Resource: !Sub
+              - "${S3BucketArn}/*"
+              - { S3BucketArn: !GetAtt S3Bucket.Arn }
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+        
+  CloudFrontDistribution:
+    Type: "AWS::CloudFront::Distribution"
+    DependsOn: 
+      - S3Bucket
+    Properties:
+      DistributionConfig:
+        DefaultRootObject: !Sub ${BucketIndexDocument}
+        Origins:
+        - OriginAccessControlId:
+            Ref: "CloudFrontOriginAccessControl"
+          DomainName: !GetAtt S3Bucket.RegionalDomainName
+          Id: !Sub "${BucketName}.s3.us-east-1.amazonaws.com"
+          S3OriginConfig:
+            OriginReadTimeout: 30
+            OriginAccessIdentity: ""
+          OriginPath: ""
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        DefaultCacheBehavior:
+          Compress: true
+          TargetOriginId: !Sub "${BucketName}.s3.us-east-1.amazonaws.com"
+          ViewerProtocolPolicy: "redirect-to-https"
+          AllowedMethods:
+          - "HEAD"
+          - "GET"
+          - "OPTIONS"
+          CachedMethods:
+          - "HEAD"
+          - "GET"
+          CachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"
+        CustomErrorResponses:
+        - ErrorCachingMinTTL: 30
+          ResponseCode: 200
+          ErrorCode: 403
+          ResponsePagePath: "/"
+        - ErrorCachingMinTTL: 30
+          ResponseCode: 200
+          ErrorCode: 404
+          ResponsePagePath: "/"
+        Enabled: true
+        IPV6Enabled: true
+        HttpVersion: "http2"
+  CloudFrontOriginAccessControl:
+    Type: "AWS::CloudFront::OriginAccessControl"
+    DependsOn: 
+      - S3Bucket
+    Properties:
+      OriginAccessControlConfig:
+        SigningBehavior: "always"
+        Description: "Created by CloudFront"
+        SigningProtocol: "sigv4"
+        OriginAccessControlOriginType: "s3"
+        Name: !Sub "oac-${BucketName}.s3.us-east-1.amazonaws.com"
+
+  
+  DynamoDBTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      TableName: !Sub ${DDBTableName}
+      AttributeDefinitions:
+      - AttributeType: "S"
+        AttributeName: "id"
+      KeySchema:
+      - KeyType: "HASH"
+        AttributeName: "id"
+      BillingMode: "PAY_PER_REQUEST"
+
+  # TODO: Apply least privilege for each lambda fn and move env variables to Parameter Store
+  LambdaFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    DependsOn:
+      - DynamoDBTable
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt DynamoDBTable.Arn
+
+  LambdaCreateTodoFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      MemorySize: 128
+      TracingConfig:
+        Mode: "PassThrough"
+      RuntimeManagementConfig:
+        UpdateRuntimeOn: "Auto"
+      Handler: "index.handler"
+      Code:
+        ZipFile: |
+          exports.handler = async () => {
+            return { statusCode: 200, body: "placeholder" };
+          }
+      Role: !GetAtt LambdaFunctionExecutionRole.Arn
+      FunctionName: "CreateTodoFn"
+      Runtime: "nodejs22.x"
+      PackageType: "Zip"
+      LoggingConfig:
+        LogFormat: "Text"
+        LogGroup: "/aws/lambda/CreateTodoFn"
+      RecursiveLoop: "Terminate"
+      Environment:
+        Variables:
+          TABLE_NAME: !Sub ${DDBTableName}
+      EphemeralStorage:
+        Size: 512
+      Architectures:
+      - "x86_64"
+  LambdaPermissionCreateTodoFunction:
+    Type: "AWS::Lambda::Permission"
+    DependsOn:
+      - ApiGatewayRestApi
+      - CreateTodoMethod
+    Properties:
+      FunctionName: !GetAtt LambdaCreateTodoFunction.Arn
+      Action: "lambda:InvokeFunction"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/todos"
+      Principal: "apigateway.amazonaws.com"
+   
+  LambdaUpdateTodoFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      MemorySize: 128
+      TracingConfig:
+        Mode: "PassThrough"
+      RuntimeManagementConfig:
+        UpdateRuntimeOn: "Auto"
+      Handler: "index.handler"
+      Code:
+        ZipFile: |
+          exports.handler = async () => {
+            return { statusCode: 200, body: "placeholder" };
+          }
+      Role: !GetAtt LambdaFunctionExecutionRole.Arn
+      FunctionName: "UpdateTodoFn"
+      Runtime: "nodejs22.x"
+      PackageType: "Zip"
+      LoggingConfig:
+        LogFormat: "Text"
+        LogGroup: "/aws/lambda/UpdateTodoFn"
+      RecursiveLoop: "Terminate"
+      Environment:
+        Variables:
+          TABLE_NAME: !Sub ${DDBTableName}
+      EphemeralStorage:
+        Size: 512
+      Architectures:
+      - "x86_64"
+  LambdaPermissionUpdateTodoFunction:
+    Type: "AWS::Lambda::Permission"
+    DependsOn:
+      - ApiGatewayRestApi
+      - UpdateTodoMethod
+    Properties:
+      FunctionName: !GetAtt LambdaUpdateTodoFunction.Arn
+      Action: "lambda:InvokeFunction"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/PUT/todos/*"
+      Principal: "apigateway.amazonaws.com"
+
+  LambdaDeleteTodoFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      MemorySize: 128
+      TracingConfig:
+        Mode: "PassThrough"
+      RuntimeManagementConfig:
+        UpdateRuntimeOn: "Auto"
+      Handler: "index.handler"
+      Code:
+        ZipFile: |
+          exports.handler = async () => {
+            return { statusCode: 200, body: "placeholder" };
+          }
+      Role: !GetAtt LambdaFunctionExecutionRole.Arn
+      FunctionName: "DeleteTodoFn"
+      Runtime: "nodejs22.x"
+      PackageType: "Zip"
+      LoggingConfig:
+        LogFormat: "Text"
+        LogGroup: "/aws/lambda/DeleteTodoFn"
+      RecursiveLoop: "Terminate"
+      Environment:
+        Variables:
+          TABLE_NAME: !Sub ${DDBTableName}
+      EphemeralStorage:
+        Size: 512
+      Architectures:
+      - "x86_64"
+  LambdaPermissionDeleteTodoFunction:
+    Type: "AWS::Lambda::Permission"
+    DependsOn:
+      - ApiGatewayRestApi
+      - DeleteTodoMethod
+    Properties:
+      FunctionName: !GetAtt LambdaDeleteTodoFunction.Arn
+      Action: "lambda:InvokeFunction"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/DELETE/todos/*"
+      Principal: "apigateway.amazonaws.com"
+
+  LambdaGetTodosFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      MemorySize: 128
+      TracingConfig:
+        Mode: "PassThrough"
+      RuntimeManagementConfig:
+        UpdateRuntimeOn: "Auto"
+      Handler: "index.handler"
+      Code:
+        ZipFile: |
+          exports.handler = async () => {
+            return { statusCode: 200, body: "placeholder" };
+          }
+      Role: !GetAtt LambdaFunctionExecutionRole.Arn
+      FunctionName: "GetTodosFn"
+      Runtime: "nodejs22.x"
+      PackageType: "Zip"
+      LoggingConfig:
+        LogFormat: "Text"
+        LogGroup: "/aws/lambda/GetTodosFn"
+      RecursiveLoop: "Terminate"
+      Environment:
+        Variables:
+          TABLE_NAME: !Sub ${DDBTableName}
+      EphemeralStorage:
+        Size: 512
+      Architectures:
+      - "x86_64"
+  LambdaPermissionGetTodosFunction:
+    Type: "AWS::Lambda::Permission"
+    DependsOn:
+      - ApiGatewayRestApi
+      - GetTodosMethod
+    Properties:
+      FunctionName: !GetAtt LambdaGetTodosFunction.Arn
+      Action: "lambda:InvokeFunction"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/GET/todos"
+      Principal: "apigateway.amazonaws.com"
+
+  ApiGatewayRestApi:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      ApiKeySourceType: "HEADER"
+      EndpointConfiguration:
+        IpAddressType: "ipv4"
+        Types:
+        - "REGIONAL"
+      Name: !Sub ${ApiName}
+  TodoApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      RestApiId: !Ref ApiGatewayRestApi
+      PathPart: todos
+  TodoByIdApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref TodoApiResource
+      RestApiId: !Ref ApiGatewayRestApi
+      PathPart: "{id}"
+  CreateTodoMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: POST
+      ResourceId: !Ref TodoApiResource
+      RestApiId: !Ref ApiGatewayRestApi
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateTodoFnArn}/invocations
+          - { CreateTodoFnArn: !GetAtt LambdaCreateTodoFunction.Arn }
+  UpdateTodoMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: PUT
+      ResourceId: !Ref TodoByIdApiResource
+      RestApiId: !Ref ApiGatewayRestApi
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UpdateTodoFnArn}/invocations
+          - { UpdateTodoFnArn: !GetAtt LambdaUpdateTodoFunction.Arn }
+  DeleteTodoMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: DELETE
+      ResourceId: !Ref TodoByIdApiResource
+      RestApiId: !Ref ApiGatewayRestApi
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeleteTodoFnArn}/invocations
+          - { DeleteTodoFnArn: !GetAtt LambdaDeleteTodoFunction.Arn }
+  GetTodosMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: GET
+      ResourceId: !Ref TodoApiResource
+      RestApiId: !Ref ApiGatewayRestApi
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetTodosFnArn}/invocations
+          - { GetTodosFnArn: !GetAtt LambdaGetTodosFunction.Arn }
+  ApiGatewayDeploymentV1:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - CreateTodoMethod
+      - UpdateTodoMethod
+      - DeleteTodoMethod
+      - GetTodosMethod
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+  ApiGatewayStageProd:
+    Type: "AWS::ApiGateway::Stage"
+    DependsOn: 
+      - ApiGatewayDeploymentV1
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+      StageName: !Sub ${EnvironmentName}
+      DeploymentId: !GetAtt ApiGatewayDeploymentV1.DeploymentId
+      TracingEnabled: false
+      CacheClusterEnabled: false
+  ApiGatewayDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - ApiGatewayStageProd
+    Properties:
+      RestApiId:
+        Ref: "ApiGatewayRestApi"
+
+Outputs:
+  ApiInvokeURL:
+    Value: !Sub "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}"
+    Description: API Gateway endpoint
+  CloudFrontURL:
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+    Description: CloudFront distribution URL

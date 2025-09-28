@@ -1,12 +1,60 @@
-# React + Vite
+# Serverless Todo Application
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This repository contains the full stack for a serverless Todo application, including the frontend code,
+CI/CD workflows (GitHub Actions), Infrastructure-as-Code (IaC) template, and system architecture diagram.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Live Demo
+The application is available at:
+https://d2gg6njvfiqvon.cloudfront.net
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Architecture Overview
+
+- **Frontend**
+  - S3 bucket hosts static web assets (React/HTML/JS).
+  - CloudFront distribution delivers content securely with HTTPS.
+  - Origin Access Control (OAC) ensures S3 is private and only accessible via CloudFront.
+
+- **Backend**
+  - API Gateway exposes REST endpoints (`/todos`, `/todos/{id}`).
+  - AWS Lambda functions implement CRUD logic.
+  - DynamoDB stores todo items.
+
+- **Monitoring**
+  - AWS CloudWatch collects logs and metrics from all services.
+  - CloudWatch Alarms monitor error rates and latency.
+  - Alarms are subscribed to an SNS topic for email notifications.
+  - AWS X-Ray provide distributed tracing.
+
+- **Security**
+  - All data is encrypted at rest (DynamoDB SSE, S3 bucket encryption).
+  - CloudFront OAC prevents direct access to S3.
+  - IAM roles provide least privilege access to Lambda functions.
+
+---
+
+## Infrastructure
+
+- **![CloudFormation template](./templates/infrastructure-template.yml)** defines:
+  - S3 + CloudFront
+  - DynamoDB
+  - Lambda functions
+  - API Gateway REST API
+  - IAM roles & permissions
+
+---
+
+## Future Improvements
+
+- Add WAF for additional API protection.
+- Enable DynamoDB PITR for resilience.
+- Configure a custom domain with **Amazon Route 53** instead of relying on the default CloudFront distribution domain.
+
+---
+
+## Diagram
+
+![Architecture Diagram](./docs/architecture-diagram.png)
