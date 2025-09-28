@@ -15,6 +15,8 @@ https://d2gg6njvfiqvon.cloudfront.net
 
 ## Architecture Overview
 
+![Architecture Diagram](./docs/diagram.png)
+
 - **Frontend**
   - S3 bucket hosts static web assets (React/HTML/JS).
   - CloudFront distribution delivers content securely with HTTPS.
@@ -49,14 +51,21 @@ https://d2gg6njvfiqvon.cloudfront.net
 
 ---
 
+## CI/CD (Frontend)
+
+The frontend React app is automatically deployed via **GitHub Actions**:
+
+- On push to `main`, the workflow:
+  1. Builds the React app  
+  2. Uploads static files to the S3 bucket  
+  3. Invalidates the CloudFront cache
+
+- AWS access is handled via **OIDC**, providing short-lived credentials.
+
+---
+
 ## Future Improvements
 
 - Add WAF for additional API protection.
 - Enable DynamoDB PITR for resilience.
 - Configure a custom domain with **Amazon Route 53** instead of relying on the default CloudFront distribution domain.
-
----
-
-## Diagram
-
-![Architecture Diagram](./docs/architecture-diagram.png)
