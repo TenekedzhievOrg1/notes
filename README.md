@@ -40,7 +40,7 @@ https://d2gg6njvfiqvon.cloudfront.net
 
 ## Infrastructure
 
-- **![CloudFormation template](./docs/infrastructure-template.yml)** defines:
+- **[CloudFormation template](./docs/infrastructure-template.yml)** defines:
   - S3 + CloudFront
   - DynamoDB
   - Lambda functions
